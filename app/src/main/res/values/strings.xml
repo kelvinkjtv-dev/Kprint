@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">KPrint</string>
+    <string name="notification_channel_name">Monitor de pedidos</string>
+    <string name="notification_channel_description">Mantém a conexão com a fila de impressão ativa</string>
+</resources>
