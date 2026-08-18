@@ -12,6 +12,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.kprint.app.MainActivity
 import com.kprint.app.R
+import com.kprint.app.data.AppConfig
 import com.kprint.app.data.EventLogStore
 import com.kprint.app.data.EventType
 import com.kprint.app.data.PrintedJobLedger
@@ -88,6 +89,7 @@ class PrintMonitorService : Service() {
                 }
 
                 try {
+                    confirmPendingAcknowledgements(config)
                     val jobs = queueClient.claimJobs(config)
                     if (jobs.isEmpty()) {
                         setStatus(MonitorStatus.LISTENING, "Aguardando novos pedidos")
@@ -96,7 +98,8 @@ class PrintMonitorService : Service() {
                         if (!running.get()) return@forEach
                         if (ledger.contains(job.id)) {
                             setStatus(MonitorStatus.LISTENING, "Confirmando pedido #${job.payload.orderNumber}")
-                            queueClient.completeJob(config, job.id, printed = true)
+                            completePrintedWithRetry(config, job.id)
+                            ledger.markAcknowledged(job.id)
                             return@forEach
                         }
 
@@ -104,6 +107,7 @@ class PrintMonitorService : Service() {
                         try {
                             val bytes = EscPosFormatter.format(job.payload, config.paperWidth)
                             printer.print(config.printerAddress, bytes)
+                            // Persist before the remote ACK: a network failure must never print a second copy.
                             ledger.markPrinted(job.id)
                             printedThisSession += 1
                             events.add(
@@ -112,14 +116,23 @@ class PrintMonitorService : Service() {
                                 type = EventType.PRINTED,
                                 id = job.id,
                             )
-                            queueClient.completeJob(config, job.id, printed = true)
-                            setStatus(MonitorStatus.LISTENING, "Pedido #${job.payload.orderNumber} impresso")
                         } catch (error: Exception) {
                             val message = friendlyError(error)
                             runCatching {
                                 queueClient.completeJob(config, job.id, printed = false, error = message)
                             }
                             logError("Falha no pedido #${job.payload.orderNumber}", message)
+                            setStatus(MonitorStatus.ERROR, message)
+                            return@forEach
+                        }
+
+                        try {
+                            completePrintedWithRetry(config, job.id)
+                            ledger.markAcknowledged(job.id)
+                            setStatus(MonitorStatus.LISTENING, "Pedido #${job.payload.orderNumber} impresso")
+                        } catch (_: Exception) {
+                            val message = "Cupom impresso; confirmação pendente por falta de conexão"
+                            events.add("Confirmação pendente", "Pedido #${job.payload.orderNumber}", EventType.INFO)
                             setStatus(MonitorStatus.ERROR, message)
                         }
                     }
@@ -132,6 +145,26 @@ class PrintMonitorService : Service() {
                 }
             }
         }
+    }
+
+    private fun confirmPendingAcknowledgements(config: AppConfig) {
+        ledger.pendingAcknowledgements().forEach { jobId ->
+            completePrintedWithRetry(config, jobId)
+            ledger.markAcknowledged(jobId)
+        }
+    }
+
+    private fun completePrintedWithRetry(config: AppConfig, jobId: String) {
+        var lastError: Exception? = null
+        repeat(3) { attempt ->
+            try {
+                if (queueClient.completeJob(config, jobId, printed = true)) return
+            } catch (error: Exception) {
+                lastError = error
+            }
+            if (attempt < 2) sleep(2_000)
+        }
+        throw lastError ?: IllegalStateException("Supabase não confirmou a impressão")
     }
 
     private fun runTestPrint() {

@@ -60,7 +60,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -176,7 +175,13 @@ private fun KPrintApp() {
     }
 
     fun withBluetoothPermission(action: PermissionAction) {
-        if (bluetooth.hasPermission()) {
+        val notificationGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        val allNeededPermissionsGranted = bluetooth.hasPermission() &&
+            (action == PermissionAction.REFRESH || notificationGranted)
+
+        if (allNeededPermissionsGranted) {
             refreshDevices()
             when (action) {
                 PermissionAction.START -> startMonitor()
@@ -467,7 +472,7 @@ private fun SettingsScreen(
 
         SectionCard("Supabase") {
             Field("URL do projeto", draft.supabaseUrl, "https://seu-projeto.supabase.co") { draft = draft.copy(supabaseUrl = it) }
-            Field("Chave anon (publishable)", draft.supabaseAnonKey, "eyJ…") { draft = draft.copy(supabaseAnonKey = it) }
+            Field("Chave publishable (ou anon legada)", draft.supabaseAnonKey, "sb_publishable_…") { draft = draft.copy(supabaseAnonKey = it) }
             Field("ID da loja", draft.storeId, "UUID da loja") { draft = draft.copy(storeId = it) }
             Field("ID deste dispositivo", draft.deviceId, "UUID cadastrado em kprint_printers") { draft = draft.copy(deviceId = it) }
             OutlinedTextField(

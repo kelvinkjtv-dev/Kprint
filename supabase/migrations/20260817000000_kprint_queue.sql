@@ -23,7 +23,8 @@ create table if not exists public.kprint_jobs (
     claimed_at timestamptz,
     printed_at timestamptz,
     attempts integer not null default 0,
-    max_attempts integer not null default 5 check (max_attempts between 1 and 20),
+    max_attempts integer not null default 100 check (max_attempts between 1 and 500),
+    next_attempt_at timestamptz not null default now(),
     last_error text,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
@@ -31,7 +32,7 @@ create table if not exists public.kprint_jobs (
 );
 
 create index if not exists kprint_jobs_pending_idx
-    on public.kprint_jobs (store_id, created_at)
+    on public.kprint_jobs (store_id, next_attempt_at, created_at)
     where status = 'pending';
 
 alter table public.kprint_printers enable row level security;
@@ -80,6 +81,7 @@ begin
        set status = 'pending',
            claimed_by = null,
            claimed_at = null,
+           next_attempt_at = now(),
            updated_at = now(),
            last_error = coalesce(stale.last_error, 'Claim expired before acknowledgement')
      where stale.store_id = p_store_id
@@ -92,7 +94,8 @@ begin
           from public.kprint_jobs as job
          where job.store_id = p_store_id
            and job.status = 'pending'
-         order by job.created_at
+           and job.next_attempt_at <= now()
+         order by job.next_attempt_at, job.created_at
          for update skip locked
          limit least(greatest(coalesce(p_limit, 5), 1), 20)
     )
@@ -160,6 +163,10 @@ begin
            set status = case when job.attempts >= job.max_attempts then 'failed' else 'pending' end,
                claimed_by = case when job.attempts >= job.max_attempts then job.claimed_by else null end,
                claimed_at = case when job.attempts >= job.max_attempts then job.claimed_at else null end,
+               next_attempt_at = case
+                   when job.attempts >= job.max_attempts then job.next_attempt_at
+                   else now() + make_interval(secs => least(300, 5 * job.attempts * job.attempts))
+               end,
                updated_at = now(),
                last_error = left(coalesce(p_error, 'Unknown print error'), 500)
          where job.id = p_job_id;

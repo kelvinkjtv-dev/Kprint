@@ -2,7 +2,6 @@ package com.kprint.app.data
 
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.BufferedReader
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -49,7 +48,11 @@ class SupabaseQueueClient {
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("Accept", "application/json")
             setRequestProperty("apikey", config.supabaseAnonKey)
-            setRequestProperty("Authorization", "Bearer ${config.supabaseAnonKey}")
+            // Legacy anon keys are JWTs and also act as the unauthenticated bearer token.
+            // New sb_publishable_* keys are opaque and must not be decoded as JWTs.
+            if (!config.supabaseAnonKey.startsWith("sb_publishable_")) {
+                setRequestProperty("Authorization", "Bearer ${config.supabaseAnonKey}")
+            }
         }
 
         return try {
@@ -59,7 +62,7 @@ class SupabaseQueueClient {
             val status = connection.responseCode
             val response = (if (status in 200..299) connection.inputStream else connection.errorStream)
                 ?.bufferedReader()
-                ?.use(BufferedReader::readText)
+                ?.use { reader -> reader.readText() }
                 .orEmpty()
             if (status !in 200..299) {
                 val detail = runCatching {

@@ -17,8 +17,23 @@ class PrintedJobLedger(context: Context) {
         val entry = "$jobId|${System.currentTimeMillis()}"
         val updated = (listOf(entry) + load().filterNot { it.substringBefore('|') == jobId })
             .take(MAX_JOB_IDS)
-        preferences.edit().putStringSet(KEY_IDS, updated.toSet()).commit()
+        val pending = pendingAcknowledgements() + jobId
+        preferences.edit()
+            .putStringSet(KEY_IDS, updated.toSet())
+            .putStringSet(KEY_PENDING_ACKS, pending)
+            .commit()
     }
+
+    @Synchronized
+    fun markAcknowledged(jobId: String) {
+        preferences.edit()
+            .putStringSet(KEY_PENDING_ACKS, pendingAcknowledgements() - jobId)
+            .commit()
+    }
+
+    @Synchronized
+    fun pendingAcknowledgements(): Set<String> =
+        preferences.getStringSet(KEY_PENDING_ACKS, emptySet()).orEmpty().toSet()
 
     private fun load(): List<String> = preferences.getStringSet(KEY_IDS, emptySet()).orEmpty()
         .sortedByDescending { it.substringAfter('|', "0").toLongOrNull() ?: 0L }
@@ -26,6 +41,7 @@ class PrintedJobLedger(context: Context) {
     companion object {
         private const val PREFS = "kprint_ledger"
         private const val KEY_IDS = "printed_job_ids"
+        private const val KEY_PENDING_ACKS = "pending_acknowledgements"
         private const val MAX_JOB_IDS = 500
     }
 }

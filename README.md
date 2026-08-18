@@ -16,14 +16,14 @@ Este repositório contém um MVP Android completo e a infraestrutura inicial do 
 - histórico local de impressões e erros;
 - retomada após reinicialização do Android;
 - credencial própria do dispositivo criptografada com Android Keystore;
-- RLS: o app não recebe `service_role` e não acessa as tabelas diretamente.
+- RLS: o app não recebe chave `secret`/`service_role` e não acessa as tabelas diretamente.
 
 ## Como funciona
 
 ```text
 Sistema de delivery
         │
-        │ kprint_enqueue_job (backend/service_role)
+        │ kprint_enqueue_job (backend/chave secret)
         ▼
 Supabase: kprint_jobs
         │
@@ -85,7 +85,7 @@ app/build/outputs/apk/debug/app-debug.apk
 
 ## Segurança
 
-Não configure `service_role` no aplicativo. Ela deve existir somente no backend. O app usa a chave anon/publishable mais uma credencial individual do dispositivo, validada dentro de funções `security definer`. As tabelas ficam com RLS ativada e sem políticas de acesso direto para `anon`/`authenticated`.
+Não configure chave `secret` nem `service_role` no aplicativo. Ela deve existir somente no backend. O app usa a chave publishable (ou `anon` legada) mais uma credencial individual do dispositivo, validada dentro de funções `security definer`. As tabelas ficam com RLS ativada e sem políticas de acesso direto para `anon`/`authenticated`.
 
 ## Próxima etapa da integração
 

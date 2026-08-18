@@ -18,30 +18,21 @@ A migration:
 - ativa RLS sem expor leitura/escrita direta ao aplicativo;
 - cria RPCs atômicas para reivindicar e confirmar impressões;
 - devolve à fila um trabalho travado por mais de 5 minutos;
-- limita cada trabalho a 5 tentativas por padrão.
+- usa backoff progressivo (até 5 minutos) e limita cada trabalho a 100 tentativas por padrão.
 
 ## 2. Cadastrar o aparelho
 
-Gere os valores fora do app. O token abaixo é apenas um exemplo; use um valor aleatório longo em produção.
+Primeiro gere e **copie os três valores** exibidos pelo SQL Editor:
 
 ```sql
-with device as (
-  select
-    gen_random_uuid() as store_id,
-    gen_random_uuid() as device_id,
-    encode(gen_random_bytes(32), 'hex') as device_token
-)
-insert into public.kprint_printers (id, store_id, name, token_hash)
 select
-  device_id,
-  store_id,
-  'Balcão principal',
-  encode(sha256(convert_to(device_token, 'UTF8')), 'hex')
-from device
-returning id as device_id, store_id;
+  gen_random_uuid() as store_id,
+  gen_random_uuid() as device_id,
+  replace(gen_random_uuid()::text, '-', '') ||
+    replace(gen_random_uuid()::text, '-', '') as device_token;
 ```
 
-O SQL Editor não retorna o CTE `device_token` no `returning`. Para uma instalação manual simples, defina e guarde um token explicitamente:
+Depois cadastre o aparelho substituindo os valores abaixo. Guarde `device_token`: somente o hash dele fica no banco.
 
 ```sql
 insert into public.kprint_printers (id, store_id, name, token_hash)
@@ -49,7 +40,7 @@ values (
   'UUID-DO-DISPOSITIVO',
   'UUID-DA-LOJA',
   'Balcão principal',
-  encode(sha256(convert_to('TOKEN-ALEATORIO-COM-PELO-MENOS-32-CARACTERES', 'UTF8')), 'hex')
+  encode(sha256(convert_to('TOKEN-GERADO-NO-PASSO-ANTERIOR', 'UTF8')), 'hex')
 );
 ```
 
@@ -65,12 +56,11 @@ O token é criptografado pelo Android Keystore antes de ser salvo.
 
 ## 3. Enfileirar um pedido
 
-No backend, depois de confirmar o pedido, chame a função com a credencial `service_role` mantida **somente no servidor**:
+No backend, depois de confirmar o pedido, chame a função com a chave `sb_secret_…` mantida **somente no servidor** (ou com a `service_role` legada):
 
 ```http
 POST https://SEU-PROJETO.supabase.co/rest/v1/rpc/kprint_enqueue_job
-apikey: SUA_SERVICE_ROLE
-Authorization: Bearer SUA_SERVICE_ROLE
+apikey: SUA_CHAVE_SECRET_DO_BACKEND
 Content-Type: application/json
 
 {
@@ -112,7 +102,7 @@ Content-Type: application/json
 }
 ```
 
-Também é possível chamar `supabase.rpc('kprint_enqueue_job', payload)` no backend.
+Também é possível chamar `supabase.rpc('kprint_enqueue_job', payload)` no backend. Se ainda usar uma `service_role` JWT legada em HTTP manual, envie-a também como `Authorization: Bearer …`.
 
 ### Campos aceitos
 
